@@ -1,0 +1,17 @@
+plugins {
+    id 'java'
+}
+
+group = 'com.modelus'
+version = '0.1.0'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+}
+
+tasks.named('jar') {
+    archiveBaseName = 'modelus'
+    destinationDirectory = file('../mods/modelus/media/java')
+}
