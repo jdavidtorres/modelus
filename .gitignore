@@ -42,3 +42,6 @@ luac.out
 # Java/Gradle build output
 build/
 out/
+
+# Agent Teams Lite registry
+.atl/
