@@ -1,3 +1,8 @@
 name=Modelus
 id=modelus
 description=Quality of life tweaks: auto-converts ammo to equipped weapon type, restores weapon condition on equip, and reduces construction material weight by 50%.
+poster=poster.png
+icon=icon.png
+author=modelus
+modversion=42.1
+versionMin=42.0.0
