@@ -1,6 +1,6 @@
 -- WeightReducer.lua
--- Reduces the weight of selected materials plus category-driven tool/weapon
--- items to 30% of vanilla values.
+-- Reduces the weight of selected materials, tools, weapons, and gardening gear
+-- to 30% of vanilla values.
 -- Trigger: OnGameStart for script items + OnPlayerUpdate for live inventory
 --          normalization.
 -- Scope: shared (client + server) for MP consistency.
@@ -13,19 +13,19 @@ local function logDebug(msg)
     end
 end
 
--- ---------------------------------------------------------------------------
--- Configuration
--- ---------------------------------------------------------------------------
-
 WeightReducer = {}
 
--- Multiplier applied to the vanilla weight of each item in ITEMS.
 -- 0.3 = 30% of original weight (70% reduction).
 WeightReducer.MULTIPLIER = 0.3
+WeightReducer._applied = false
+WeightReducer._updateTick = 0
+WeightReducer.UPDATE_INTERVAL_TICKS = 120
 
--- Explicit material allowlist.
--- Firewood is intentionally excluded: its weight determines campfire burn time.
-WeightReducer.MATERIAL_ITEMS = {
+-- SAFE EXPLICIT APPROACH:
+-- PZ/Kahlua does not behave reliably when sweeping every ScriptItem by metadata.
+-- Keep this as an explicit fullType allowlist and normalize live inventory items
+-- by matching their fullType directly.
+WeightReducer.ITEMS = {
     -- Construction materials
     "Base.Log",
     "Base.Plank",
@@ -47,20 +47,43 @@ WeightReducer.MATERIAL_ITEMS = {
     "Base.ScrapMetal",
     "Base.SmallSheetMetal",
     "Base.UnusableMetal",
+    "Base.Rope",
+    "Base.Twine",
+    "Base.DuctTape",
+    "Base.Woodglue",
 
-}
+    -- Tools / hybrid tool-weapons
+    "Base.Hammer",
+    "Base.BallPeenHammer",
+    "Base.ClubHammer",
+    "Base.Screwdriver",
+    "Base.Saw",
+    "Base.GardenSaw",
+    "Base.Wrench",
+    "Base.PipeWrench",
+    "Base.LugWrench",
+    "Base.Crowbar",
+    "Base.HandAxe",
+    "Base.Axe",
+    "Base.WoodAxe",
+    "Base.PickAxe",
+    "Base.Shovel",
+    "Base.Shovel2",
+    "Base.GardenHoe",
+    "Base.GardenFork",
+    "Base.HandFork",
+    "Base.HandShovel",
+    "Base.EntrenchingTool",
+    "Base.Sledgehammer",
+    "Base.Sledgehammer2",
+    "Base.BlowTorch",
+    "Base.WeldingMask",
+    "Base.Tongs",
+    "Base.Scissors",
+    "Base.Needle",
+    "Base.WoodenMallet",
 
--- Category-driven reduction for script items that the vanilla game already
--- models as hybrid tools/weapons or gardening gear.
-WeightReducer.REDUCED_DISPLAY_CATEGORIES = {
-    ToolWeapon = true,
-    GardeningWeapon = true,
-    Gardening = true,
-}
-
--- Explicit weapon types to reduce even if their DisplayCategory isn't one of
--- the hybrid categories above.
-WeightReducer.WEAPON_ITEMS = {
+    -- Weapons
     "Base.BaseballBat",
     "Base.Nightstick",
     "Base.HuntingKnife",
@@ -82,16 +105,6 @@ WeightReducer.WEAPON_ITEMS = {
     "Base.AssaultRifle2",
 }
 
--- Items that may match a broad display category but should keep vanilla weight.
-WeightReducer.DENYLIST = {
-    ["Base.Firewood"] = true,
-}
-
--- Guard: prevents double-application if OnGameStart fires more than once.
-WeightReducer._applied = false
-WeightReducer._updateTick = 0
-WeightReducer.UPDATE_INTERVAL_TICKS = 120
-
 local function buildLookup(list)
     local lookup = {}
     for _, fullType in ipairs(list) do
@@ -100,107 +113,48 @@ local function buildLookup(list)
     return lookup
 end
 
-WeightReducer._materialLookup = buildLookup(WeightReducer.MATERIAL_ITEMS)
-WeightReducer._weaponLookup = buildLookup(WeightReducer.WEAPON_ITEMS)
+WeightReducer._lookup = buildLookup(WeightReducer.ITEMS)
 
-local function isLiterature(scriptItem)
-    local ok, result = pcall(function()
-        return scriptItem:isItemType(ItemType.LITERATURE)
-    end)
-    return ok and result == true
+local function shouldReduceFullType(fullType)
+    return fullType and WeightReducer._lookup[fullType] == true
 end
 
-local function isReducedByCategory(scriptItem)
-    local displayCategory = scriptItem.getDisplayCategory and scriptItem:getDisplayCategory()
-    if not displayCategory or not WeightReducer.REDUCED_DISPLAY_CATEGORIES[displayCategory] then
-        return false
-    end
-
-    -- Gardening is broad and includes seed packets/books; we still want real
-    -- usable gardening gear, not literature.
-    if displayCategory == "Gardening" and isLiterature(scriptItem) then
-        return false
-    end
-
-    return true
-end
-
-local function shouldReduce(scriptItem)
-    if not scriptItem then return false end
-    local okHidden, isHidden = pcall(function() return scriptItem:isHidden() end)
-    if okHidden and isHidden then return false end
-
-    local okObsolete, isObsolete = pcall(function() return scriptItem:getObsolete() end)
-    if okObsolete and isObsolete then return false end
-
-    local okFullType, fullType = pcall(function() return scriptItem:getFullName() end)
-    if not okFullType or not fullType then return false end
-
-    if WeightReducer.DENYLIST[fullType] then
-        return false
-    end
-
-    if WeightReducer._materialLookup[fullType] then
-        return true
-    end
-
-    if WeightReducer._weaponLookup[fullType] then
-        return true
-    end
-
-    return isReducedByCategory(scriptItem)
-end
-
-local function applyWeightReduction(scriptItem)
+local function applyScriptWeightReduction(fullType)
+    local scriptItem = ScriptManager.instance:getItem(fullType)
     if not scriptItem then
+        logDebug("script item not found, skipping: " .. tostring(fullType))
         return
     end
 
-    local okWeight, originalWeight = pcall(function() return scriptItem:getWeight() end)
-    if not okWeight or not originalWeight then return end
-
+    local originalWeight = scriptItem:getWeight()
     local newWeight = originalWeight * WeightReducer.MULTIPLIER
-    local okSet = pcall(function() scriptItem:setWeight(newWeight) end)
-    if not okSet then return end
-
-    local okName, fullType = pcall(function() return scriptItem:getFullName() end)
-    if okName and fullType then
-        logDebug(fullType .. ": " .. tostring(originalWeight) .. " → " .. tostring(newWeight))
-    end
+    scriptItem:setWeight(newWeight)
+    logDebug(fullType .. ": " .. tostring(originalWeight) .. " → " .. tostring(newWeight))
 end
 
 local function applyInventoryItemReduction(item)
     if not item then return end
 
-    local okScriptItem, scriptItem = pcall(function() return item:getScriptItem() end)
-    if not okScriptItem or not scriptItem then return end
-
-    if not shouldReduce(scriptItem) then
+    local fullType = item:getFullType()
+    if not shouldReduceFullType(fullType) then
         return
     end
 
-    local okTarget, targetWeight = pcall(function() return scriptItem:getWeight() end)
-    if not okTarget or not targetWeight then return end
-
-    local okActual, actualWeight = pcall(function() return item:getActualWeight() end)
-    local okWeight, currentWeight = pcall(function() return item:getWeight() end)
-    if okActual and okWeight and (actualWeight ~= targetWeight or currentWeight ~= targetWeight) then
-        pcall(function() item:setActualWeight(targetWeight) end)
-        pcall(function() item:setWeight(targetWeight) end)
-        pcall(function() item:setCustomWeight(true) end)
-
-        local okType, fullType = pcall(function() return item:getFullType() end)
-        if okType and fullType then
-            logDebug("inventory item normalized: " .. tostring(fullType) .. " → " .. tostring(targetWeight))
-        end
+    local scriptItem = item:getScriptItem()
+    if not scriptItem then
+        return
     end
 
-    local okIsContainer, isContainer = pcall(function() return item:IsInventoryContainer() end)
-    if okIsContainer and isContainer then
-        local okInventory, inventory = pcall(function() return item:getInventory() end)
-        if not okInventory or not inventory then return end
+    local targetWeight = scriptItem:getWeight()
+    if item:getActualWeight() ~= targetWeight or item:getWeight() ~= targetWeight then
+        item:setActualWeight(targetWeight)
+        item:setWeight(targetWeight)
+        item:setCustomWeight(true)
+        logDebug("inventory item normalized: " .. tostring(fullType) .. " → " .. tostring(targetWeight))
+    end
 
-        local nestedItems = inventory:getItems()
+    if item:IsInventoryContainer() and item:getInventory() then
+        local nestedItems = item:getInventory():getItems()
         for i = 1, nestedItems:size() do
             applyInventoryItemReduction(nestedItems:get(i - 1))
         end
@@ -208,7 +162,7 @@ local function applyInventoryItemReduction(item)
 end
 
 local function normalizePlayerInventory(player)
-    if not player or not player.getInventory then return end
+    if not player then return end
 
     local items = player:getInventory():getItems()
     for i = 1, items:size() do
@@ -216,26 +170,16 @@ local function normalizePlayerInventory(player)
     end
 end
 
--- ---------------------------------------------------------------------------
--- Core
--- ---------------------------------------------------------------------------
-
---- Applies the weight multiplier to configured materials and to script items
---- selected by real vanilla display categories.
---- Safe to call multiple times — only runs once per session.
 function WeightReducer.apply()
     if WeightReducer._applied then
         logDebug("already applied, skipping")
         return
     end
+
     WeightReducer._applied = true
 
-    local allItems = getScriptManager():getAllItems()
-    for i = 1, allItems:size() do
-        local scriptItem = allItems:get(i - 1)
-        if shouldReduce(scriptItem) then
-            applyWeightReduction(scriptItem)
-        end
+    for _, fullType in ipairs(WeightReducer.ITEMS) do
+        applyScriptWeightReduction(fullType)
     end
 end
 
@@ -252,10 +196,6 @@ local function onPlayerUpdate(player)
     WeightReducer._updateTick = 0
     normalizePlayerInventory(player)
 end
-
--- ---------------------------------------------------------------------------
--- Hook
--- ---------------------------------------------------------------------------
 
 Events.OnGameStart.Add(WeightReducer.apply)
 Events.OnPlayerUpdate.Add(onPlayerUpdate)
