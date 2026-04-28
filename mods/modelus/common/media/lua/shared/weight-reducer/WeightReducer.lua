@@ -1,6 +1,6 @@
 -- WeightReducer.lua
--- Reduces the weight of selected materials, tools, and weapons to 30% of
--- vanilla values.
+-- Reduces the weight of selected materials plus category-driven tool/weapon
+-- items to 30% of vanilla values.
 -- Trigger: OnGameStart — applies once at load time via ScriptManager.
 -- Scope: shared (client + server) for MP consistency.
 
@@ -22,9 +22,9 @@ WeightReducer = {}
 -- 0.3 = 30% of original weight (70% reduction).
 WeightReducer.MULTIPLIER = 0.3
 
--- Allowlist of vanilla item types to reduce.
+-- Explicit material allowlist.
 -- Firewood is intentionally excluded: its weight determines campfire burn time.
-WeightReducer.ITEMS = {
+WeightReducer.MATERIAL_ITEMS = {
     -- Construction materials
     "Base.Log",
     "Base.Plank",
@@ -47,34 +47,19 @@ WeightReducer.ITEMS = {
     "Base.SmallSheetMetal",
     "Base.UnusableMetal",
 
-    -- Tools
-    "Base.Hammer",
-    "Base.BallPeenHammer",
-    "Base.ClubHammer",
-    "Base.Screwdriver",
-    "Base.Saw",
-    "Base.GardenSaw",
-    "Base.Wrench",
-    "Base.PipeWrench",
-    "Base.LugWrench",
-    "Base.Crowbar",
-    "Base.HandAxe",
-    "Base.Axe",
-    "Base.WoodAxe",
-    "Base.PickAxe",
-    "Base.Shovel",
-    "Base.Shovel2",
-    "Base.GardenHoe",
-    "Base.Sledgehammer",
-    "Base.Sledgehammer2",
-    "Base.BlowTorch",
-    "Base.WeldingMask",
-    "Base.Tongs",
-    "Base.Scissors",
-    "Base.Needle",
-    "Base.WoodenMallet",
+}
 
-    -- Weapons
+-- Category-driven reduction for script items that the vanilla game already
+-- models as hybrid tools/weapons or gardening gear.
+WeightReducer.REDUCED_DISPLAY_CATEGORIES = {
+    ToolWeapon = true,
+    GardeningWeapon = true,
+    Gardening = true,
+}
+
+-- Explicit weapon types to reduce even if their DisplayCategory isn't one of
+-- the hybrid categories above.
+WeightReducer.WEAPON_ITEMS = {
     "Base.BaseballBat",
     "Base.Nightstick",
     "Base.HuntingKnife",
@@ -96,14 +81,78 @@ WeightReducer.ITEMS = {
     "Base.AssaultRifle2",
 }
 
+-- Items that may match a broad display category but should keep vanilla weight.
+WeightReducer.DENYLIST = {
+    ["Base.Firewood"] = true,
+}
+
 -- Guard: prevents double-application if OnGameStart fires more than once.
 WeightReducer._applied = false
+
+local function buildLookup(list)
+    local lookup = {}
+    for _, fullType in ipairs(list) do
+        lookup[fullType] = true
+    end
+    return lookup
+end
+
+WeightReducer._materialLookup = buildLookup(WeightReducer.MATERIAL_ITEMS)
+WeightReducer._weaponLookup = buildLookup(WeightReducer.WEAPON_ITEMS)
+
+local function isLiterature(scriptItem)
+    return scriptItem.isItemType and scriptItem:isItemType(ItemType.LITERATURE)
+end
+
+local function isReducedByCategory(scriptItem)
+    local displayCategory = scriptItem.getDisplayCategory and scriptItem:getDisplayCategory()
+    if not displayCategory or not WeightReducer.REDUCED_DISPLAY_CATEGORIES[displayCategory] then
+        return false
+    end
+
+    -- Gardening is broad and includes seed packets/books; we still want real
+    -- usable gardening gear, not literature.
+    if displayCategory == "Gardening" and isLiterature(scriptItem) then
+        return false
+    end
+
+    return true
+end
+
+local function shouldReduce(scriptItem)
+    if not scriptItem then return false end
+    if scriptItem.isHidden and scriptItem:isHidden() then return false end
+    if scriptItem.getObsolete and scriptItem:getObsolete() then return false end
+
+    local fullType = scriptItem:getFullName()
+    if WeightReducer.DENYLIST[fullType] then
+        return false
+    end
+
+    if WeightReducer._materialLookup[fullType] then
+        return true
+    end
+
+    if WeightReducer._weaponLookup[fullType] then
+        return true
+    end
+
+    return isReducedByCategory(scriptItem)
+end
+
+local function applyWeightReduction(scriptItem)
+    local originalWeight = scriptItem:getWeight()
+    local newWeight = originalWeight * WeightReducer.MULTIPLIER
+    scriptItem:setWeight(newWeight)
+    logDebug(scriptItem:getFullName() .. ": " .. tostring(originalWeight) .. " → " .. tostring(newWeight))
+end
 
 -- ---------------------------------------------------------------------------
 -- Core
 -- ---------------------------------------------------------------------------
 
---- Applies the weight multiplier to all items in the allowlist.
+--- Applies the weight multiplier to configured materials and to script items
+--- selected by real vanilla display categories.
 --- Safe to call multiple times — only runs once per session.
 function WeightReducer.apply()
     if WeightReducer._applied then
@@ -112,18 +161,11 @@ function WeightReducer.apply()
     end
     WeightReducer._applied = true
 
-    for _, fullType in ipairs(WeightReducer.ITEMS) do
-        local scriptItem = ScriptManager.instance:getItem(fullType)
-        if not scriptItem then
-            logDebug("not found in ScriptManager, skipping: " .. fullType)
-        else
-            local originalWeight = scriptItem:getWeight()
-            local newWeight      = originalWeight * WeightReducer.MULTIPLIER
-            scriptItem:setWeight(newWeight)
-            logDebug(
-                fullType .. ": " ..
-                tostring(originalWeight) .. " → " .. tostring(newWeight)
-            )
+    local allItems = getScriptManager():getAllItems()
+    for i = 1, allItems:size() do
+        local scriptItem = allItems:get(i - 1)
+        if shouldReduce(scriptItem) then
+            applyWeightReduction(scriptItem)
         end
     end
 end
