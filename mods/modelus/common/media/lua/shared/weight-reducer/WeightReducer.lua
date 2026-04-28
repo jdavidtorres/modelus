@@ -124,6 +124,7 @@ end
 
 local function shouldReduce(scriptItem)
     if not scriptItem then return false end
+    if not scriptItem.getFullName then return false end
     if scriptItem.isHidden and scriptItem:isHidden() then return false end
     if scriptItem.getObsolete and scriptItem:getObsolete() then return false end
 
@@ -144,6 +145,10 @@ local function shouldReduce(scriptItem)
 end
 
 local function applyWeightReduction(scriptItem)
+    if not scriptItem or not scriptItem.getWeight or not scriptItem.setWeight or not scriptItem.getFullName then
+        return
+    end
+
     local originalWeight = scriptItem:getWeight()
     local newWeight = originalWeight * WeightReducer.MULTIPLIER
     scriptItem:setWeight(newWeight)

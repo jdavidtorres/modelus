@@ -88,7 +88,11 @@ function Session.new(player, recipe, baseItem)
     s.baseItem  = baseItem
     s.addAction = nil
     s.usedItems = {}   -- map: fullType -> count
-    logDebug("Session.new recipe=" .. tostring(recipe:getUntranslatedName and recipe:getUntranslatedName() or recipe))
+    local recipeName = recipe
+    if recipe and recipe.getUntranslatedName then
+        recipeName = recipe:getUntranslatedName()
+    end
+    logDebug("Session.new recipe=" .. tostring(recipeName))
     return s
 end
 
