@@ -104,7 +104,10 @@ WeightReducer._materialLookup = buildLookup(WeightReducer.MATERIAL_ITEMS)
 WeightReducer._weaponLookup = buildLookup(WeightReducer.WEAPON_ITEMS)
 
 local function isLiterature(scriptItem)
-    return scriptItem.isItemType and scriptItem:isItemType(ItemType.LITERATURE)
+    local ok, result = pcall(function()
+        return scriptItem:isItemType(ItemType.LITERATURE)
+    end)
+    return ok and result == true
 end
 
 local function isReducedByCategory(scriptItem)
@@ -124,11 +127,15 @@ end
 
 local function shouldReduce(scriptItem)
     if not scriptItem then return false end
-    if not scriptItem.getFullName then return false end
-    if scriptItem.isHidden and scriptItem:isHidden() then return false end
-    if scriptItem.getObsolete and scriptItem:getObsolete() then return false end
+    local okHidden, isHidden = pcall(function() return scriptItem:isHidden() end)
+    if okHidden and isHidden then return false end
 
-    local fullType = scriptItem:getFullName()
+    local okObsolete, isObsolete = pcall(function() return scriptItem:getObsolete() end)
+    if okObsolete and isObsolete then return false end
+
+    local okFullType, fullType = pcall(function() return scriptItem:getFullName() end)
+    if not okFullType or not fullType then return false end
+
     if WeightReducer.DENYLIST[fullType] then
         return false
     end
@@ -145,34 +152,55 @@ local function shouldReduce(scriptItem)
 end
 
 local function applyWeightReduction(scriptItem)
-    if not scriptItem or not scriptItem.getWeight or not scriptItem.setWeight or not scriptItem.getFullName then
+    if not scriptItem then
         return
     end
 
-    local originalWeight = scriptItem:getWeight()
+    local okWeight, originalWeight = pcall(function() return scriptItem:getWeight() end)
+    if not okWeight or not originalWeight then return end
+
     local newWeight = originalWeight * WeightReducer.MULTIPLIER
-    scriptItem:setWeight(newWeight)
-    logDebug(scriptItem:getFullName() .. ": " .. tostring(originalWeight) .. " → " .. tostring(newWeight))
+    local okSet = pcall(function() scriptItem:setWeight(newWeight) end)
+    if not okSet then return end
+
+    local okName, fullType = pcall(function() return scriptItem:getFullName() end)
+    if okName and fullType then
+        logDebug(fullType .. ": " .. tostring(originalWeight) .. " → " .. tostring(newWeight))
+    end
 end
 
 local function applyInventoryItemReduction(item)
-    if not item or not item.getScriptItem then return end
+    if not item then return end
 
-    local scriptItem = item:getScriptItem()
+    local okScriptItem, scriptItem = pcall(function() return item:getScriptItem() end)
+    if not okScriptItem or not scriptItem then return end
+
     if not shouldReduce(scriptItem) then
         return
     end
 
-    local targetWeight = scriptItem:getWeight()
-    if item:getActualWeight() ~= targetWeight or item:getWeight() ~= targetWeight then
-        item:setActualWeight(targetWeight)
-        item:setWeight(targetWeight)
-        item:setCustomWeight(true)
-        logDebug("inventory item normalized: " .. tostring(item:getFullType()) .. " → " .. tostring(targetWeight))
+    local okTarget, targetWeight = pcall(function() return scriptItem:getWeight() end)
+    if not okTarget or not targetWeight then return end
+
+    local okActual, actualWeight = pcall(function() return item:getActualWeight() end)
+    local okWeight, currentWeight = pcall(function() return item:getWeight() end)
+    if okActual and okWeight and (actualWeight ~= targetWeight or currentWeight ~= targetWeight) then
+        pcall(function() item:setActualWeight(targetWeight) end)
+        pcall(function() item:setWeight(targetWeight) end)
+        pcall(function() item:setCustomWeight(true) end)
+
+        local okType, fullType = pcall(function() return item:getFullType() end)
+        if okType and fullType then
+            logDebug("inventory item normalized: " .. tostring(fullType) .. " → " .. tostring(targetWeight))
+        end
     end
 
-    if item.IsInventoryContainer and item:IsInventoryContainer() and item:getInventory() then
-        local nestedItems = item:getInventory():getItems()
+    local okIsContainer, isContainer = pcall(function() return item:IsInventoryContainer() end)
+    if okIsContainer and isContainer then
+        local okInventory, inventory = pcall(function() return item:getInventory() end)
+        if not okInventory or not inventory then return end
+
+        local nestedItems = inventory:getItems()
         for i = 1, nestedItems:size() do
             applyInventoryItemReduction(nestedItems:get(i - 1))
         end
