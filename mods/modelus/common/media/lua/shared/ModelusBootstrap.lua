@@ -8,6 +8,7 @@ local function modelusBootstrap()
     print("[Modelus] ammo-loot-drop-carton: active")
     print("[Modelus] auto-reload:      active (reloads equipped weapon on empty)")
     print("[Modelus] auto-cook:        active")
+    print("[Modelus] free-hotwiring:   active")
 
     if not luajava then
         print("[Modelus] luajava is not available in this context")
