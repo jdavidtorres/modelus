@@ -5,6 +5,7 @@ local function modelusBootstrap()
     print("[Modelus] weight-reducer:   active (50% weight for construction materials)")
     print("[Modelus] ammo-loot-drop:   active")
     print("[Modelus] ammo-loot-drop-box: active")
+    print("[Modelus] ammo-loot-drop-carton: active")
     print("[Modelus] auto-reload:      active (reloads equipped weapon on empty)")
     print("[Modelus] auto-cook:        active")
 
