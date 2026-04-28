@@ -1,4 +1,3 @@
 VERSION = 1,
 
-ContextMenu_AutoReload = "Auto Reload",
 ContextMenu_AutoCook = "Auto Cook",
