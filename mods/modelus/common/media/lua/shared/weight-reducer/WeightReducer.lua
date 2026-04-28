@@ -263,8 +263,8 @@ local function normalizeInventoryItem(item)
     end
 
     -- Always recurse into nested inventories regardless of this item's reducibility.
-    if item:IsInventoryContainer and item:IsInventoryContainer() then
-        local nested = item:getInventory and item:getInventory()
+    if item:IsInventoryContainer() then
+        local nested = item:getInventory()
         if nested then
             local nestedItems = nested:getItems()
             for i = 1, nestedItems:size() do

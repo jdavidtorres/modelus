@@ -132,8 +132,8 @@ end
 --- Freshness heuristic: higher is fresher.
 --- Uses remaining shelf life (offAgeMax - age) when available, else 0.
 local function freshnessScore(item)
-    local offAgeMax = item:getOffAgeMax and item:getOffAgeMax() or 0
-    local age       = item:getAge       and item:getAge()       or 0
+    local offAgeMax = item:getOffAgeMax()
+    local age       = item:getAge()
     return offAgeMax - age
 end
 
