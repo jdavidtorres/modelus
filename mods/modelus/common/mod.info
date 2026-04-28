@@ -1,6 +1,6 @@
 name=Modelus
 id=modelus
-description=Quality of life tweaks: auto-converts ammo to equipped weapon type, restores weapon condition on equip, and reduces construction material weight by 50%.
+description=Quality of life tweaks: auto-converts ammo to equipped weapon type, restores weapon condition on equip, and reduces weight of construction materials, tools, weapons, gardening gear, and ammo by 70% (to 30% of vanilla).
 poster=poster.png
 icon=icon.png
 author=modelus
