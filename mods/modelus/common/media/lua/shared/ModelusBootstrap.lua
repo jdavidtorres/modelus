@@ -4,6 +4,7 @@ local function modelusBootstrap()
     print("[Modelus] ammo-converter:   active (auto-converts ammo on idle)")
     print("[Modelus] weight-reducer:   active (50% weight for construction materials)")
     print("[Modelus] ammo-loot-drop:   active")
+    print("[Modelus] auto-reload:      active")
 
     if not luajava then
         print("[Modelus] luajava is not available in this context")
