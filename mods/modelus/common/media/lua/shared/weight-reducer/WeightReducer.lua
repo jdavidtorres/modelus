@@ -1,7 +1,8 @@
 -- WeightReducer.lua
 -- Reduces the weight of selected materials plus category-driven tool/weapon
 -- items to 30% of vanilla values.
--- Trigger: OnGameStart — applies once at load time via ScriptManager.
+-- Trigger: OnGameStart for script items + OnPlayerUpdate for live inventory
+--          normalization.
 -- Scope: shared (client + server) for MP consistency.
 
 local _LOG_PREFIX = "[Modelus][WeightReducer]"
@@ -88,6 +89,8 @@ WeightReducer.DENYLIST = {
 
 -- Guard: prevents double-application if OnGameStart fires more than once.
 WeightReducer._applied = false
+WeightReducer._updateTick = 0
+WeightReducer.UPDATE_INTERVAL_TICKS = 120
 
 local function buildLookup(list)
     local lookup = {}
@@ -147,6 +150,39 @@ local function applyWeightReduction(scriptItem)
     logDebug(scriptItem:getFullName() .. ": " .. tostring(originalWeight) .. " → " .. tostring(newWeight))
 end
 
+local function applyInventoryItemReduction(item)
+    if not item or not item.getScriptItem then return end
+
+    local scriptItem = item:getScriptItem()
+    if not shouldReduce(scriptItem) then
+        return
+    end
+
+    local targetWeight = scriptItem:getWeight()
+    if item:getActualWeight() ~= targetWeight or item:getWeight() ~= targetWeight then
+        item:setActualWeight(targetWeight)
+        item:setWeight(targetWeight)
+        item:setCustomWeight(true)
+        logDebug("inventory item normalized: " .. tostring(item:getFullType()) .. " → " .. tostring(targetWeight))
+    end
+
+    if item.IsInventoryContainer and item:IsInventoryContainer() and item:getInventory() then
+        local nestedItems = item:getInventory():getItems()
+        for i = 1, nestedItems:size() do
+            applyInventoryItemReduction(nestedItems:get(i - 1))
+        end
+    end
+end
+
+local function normalizePlayerInventory(player)
+    if not player or not player.getInventory then return end
+
+    local items = player:getInventory():getItems()
+    for i = 1, items:size() do
+        applyInventoryItemReduction(items:get(i - 1))
+    end
+end
+
 -- ---------------------------------------------------------------------------
 -- Core
 -- ---------------------------------------------------------------------------
@@ -170,8 +206,23 @@ function WeightReducer.apply()
     end
 end
 
+local function onPlayerUpdate(player)
+    if not player or player:getPlayerNum() ~= 0 then
+        return
+    end
+
+    WeightReducer._updateTick = WeightReducer._updateTick + 1
+    if WeightReducer._updateTick < WeightReducer.UPDATE_INTERVAL_TICKS then
+        return
+    end
+
+    WeightReducer._updateTick = 0
+    normalizePlayerInventory(player)
+end
+
 -- ---------------------------------------------------------------------------
 -- Hook
 -- ---------------------------------------------------------------------------
 
 Events.OnGameStart.Add(WeightReducer.apply)
+Events.OnPlayerUpdate.Add(onPlayerUpdate)
