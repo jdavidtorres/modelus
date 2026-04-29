@@ -21,6 +21,45 @@ WeightReducer._applied = false
 WeightReducer._updateTick = 0
 WeightReducer.UPDATE_INTERVAL_TICKS = 120
 
+local function splitPipeSeparatedItems(value)
+    local items = {}
+    if not value or value == "" then return items end
+
+    for item in string.gmatch(value, "([^|]+)") do
+        items[#items + 1] = item
+    end
+
+    return items
+end
+
+local function tryLoadJavaCatalog()
+    if not luajava then
+        return nil
+    end
+
+    local okClass, bridge = pcall(luajava.bindClass, "com.modelus.bridge.ModelusBridge")
+    if not okClass or not bridge then
+        return nil
+    end
+
+    local okItems, items = pcall(bridge.weightReducerItems)
+    if not okItems or not items or items == "" then
+        return nil
+    end
+
+    local okMultiplier, multiplier = pcall(bridge.weightReducerMultiplier)
+    if okMultiplier and multiplier and multiplier > 0 and multiplier <= 1 then
+        WeightReducer.MULTIPLIER = multiplier
+    end
+
+    local okSummary, summary = pcall(bridge.weightReducerValidationSummary)
+    if okSummary and summary then
+        print(_LOG_PREFIX .. " Java catalog loaded: " .. tostring(summary))
+    end
+
+    return splitPipeSeparatedItems(items)
+end
+
 -- SAFE EXPLICIT APPROACH:
 -- PZ/Kahlua does not behave reliably when sweeping every ScriptItem by metadata.
 -- Keep this as an explicit fullType allowlist grouped by family.
@@ -223,6 +262,16 @@ for _, group in pairs(WeightReducer.ITEMS_BY_FAMILY) do
     for _, fullType in ipairs(group) do
         WeightReducer.ITEMS[#WeightReducer.ITEMS + 1] = fullType
     end
+end
+
+local javaItems = tryLoadJavaCatalog()
+if javaItems and #javaItems > 0 then
+    WeightReducer.ITEMS = javaItems
+    local javaLookup = {}
+    for _, fullType in ipairs(javaItems) do
+        javaLookup[fullType] = true
+    end
+    WeightReducer._lookup = javaLookup
 end
 
 local function shouldReduceFullType(fullType)

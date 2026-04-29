@@ -13,5 +13,5 @@ java {
 
 tasks.named('jar') {
     archiveBaseName = 'modelus'
-    destinationDirectory = file('../mods/modelus/media/java')
+    destinationDirectory = file('../mods/modelus/common/media/java')
 }

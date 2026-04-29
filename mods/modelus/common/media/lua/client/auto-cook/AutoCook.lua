@@ -268,9 +268,9 @@ local function onFillInventoryObjectContextMenu(playerNum, context, items)
     if not player then return end
 
     -- Hide option when recipe is already at capacity.
-    local maxItems = recipe:getMaxItems and recipe:getMaxItems() or 0
+    local maxItems = recipe:getMaxItems()
     local curItems = 0
-    local extra = item.getExtraItems and item:getExtraItems()
+    local extra = item:getExtraItems()
     if extra and extra.size then curItems = extra:size() end
 
     local option = context:addOption(
