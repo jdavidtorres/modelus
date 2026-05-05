@@ -4,5 +4,5 @@ description=Quality of life tweaks: auto-converts ammo to equipped weapon type, 
 poster=poster.png
 icon=icon.png
 author=modelus
-modversion=42.1
+modversion=0.6.0
 versionMin=42.0.0
