@@ -3,11 +3,11 @@ plugins {
 }
 
 group = 'com.modelus'
-version = '0.6.2'
+version = '0.6.9'
 
 java {
     toolchain {
-        languageVersion = JavaLanguageVersion.of(17)
+        languageVersion = JavaLanguageVersion.of(25)
     }
 }
 
@@ -16,6 +16,7 @@ repositories {
 }
 
 dependencies {
+    compileOnly files('D:/SteamLibrary/steamapps/common/ProjectZomboid/projectzomboid.jar')
     testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
@@ -37,9 +38,6 @@ tasks.register('validateWeightReducer', JavaExec) {
 
     classpath = sourceSets.main.runtimeClasspath
     mainClass = 'com.modelus.validation.WeightReducerValidationRunner'
-
-    // Optional: set PZ_SCRIPTS_PATH env var to cross-reference B42 item scripts.
-    // environment 'PZ_SCRIPTS_PATH', '/path/to/pz/media/scripts'
 }
 
 // ── generateWeightReducerLua ──────────────────────────────────────────────────
