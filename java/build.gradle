@@ -3,7 +3,7 @@ plugins {
 }
 
 group = 'com.modelus'
-version = '0.1.0'
+version = '0.6.2'
 
 java {
     toolchain {
@@ -71,4 +71,39 @@ tasks.register('checkWeightReducerLuaDrift', JavaExec) {
 tasks.named('check') {
     dependsOn validateWeightReducer
     dependsOn checkWeightReducerLuaDrift
+}
+
+// ── syncVersions ──────────────────────────────────────────────────────────────
+// Synchronize version across mod.info and ModelusMainScreen.lua from build.gradle
+tasks.register('syncVersions') {
+    group = 'build'
+    description = 'Synchronize version from build.gradle to mod.info and ModelusMainScreen.lua'
+
+    doLast {
+        def projectVersion = project.version.toString()
+        def rootPath = rootProject.projectDir.parentFile.absolutePath
+
+        // Update mod.info
+        def modInfoFile = file("${rootPath}/mods/modelus/common/mod.info")
+        if (modInfoFile.exists()) {
+            def modInfoContent = modInfoFile.text
+            modInfoContent = modInfoContent.replaceAll(/modversion=[\d.]+/, "modversion=${projectVersion}")
+            modInfoFile.text = modInfoContent
+            println("[syncVersions] Updated mod.info to version ${projectVersion}")
+        }
+
+        // Update ModelusMainScreen.lua
+        def luaFile = file("${rootPath}/mods/modelus/common/media/lua/client/ModelusMainScreen.lua")
+        if (luaFile.exists()) {
+            def luaContent = luaFile.text
+            luaContent = luaContent.replaceAll(/local versionText = "Modelus v[\d.]+"/, "local versionText = \"Modelus v${projectVersion}\"")
+            luaFile.text = luaContent
+            println("[syncVersions] Updated ModelusMainScreen.lua to version ${projectVersion}")
+        }
+    }
+}
+
+// Run syncVersions before jar task
+tasks.named('jar') {
+    dependsOn syncVersions
 }
