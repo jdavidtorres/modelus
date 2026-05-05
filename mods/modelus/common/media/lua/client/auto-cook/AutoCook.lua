@@ -4,293 +4,374 @@
 -- reachable containers and queues it into the recipe, chaining until the
 -- recipe is full or no valid ingredient remains.
 -- Selection strategy: variety-first (bucket by usage count) then freshness.
--- v1 — no persistent settings, no nutrition modes, no AutoCraft.
+-- v3 (rewrite) -- B42-compatible, Kahlua-safe.
 -- Hook: Events.OnFillInventoryObjectContextMenu (additive, no patching).
 -- Scope: client only.
 
-local _LOG_PREFIX = "[Modelus][AutoCook]"
-
-local function logDebug(msg)
-    if getDebug and getDebug() then
-        print(_LOG_PREFIX .. " " .. msg)
-    end
-end
+require "TimedActions/ISAddItemInRecipe"
+require "TimedActions/ISInventoryTransferAction"
 
 -- ---------------------------------------------------------------------------
 -- Module table
 -- ---------------------------------------------------------------------------
 
-AutoCook = AutoCook or {}
-AutoCook.OPTIONS = AutoCook.OPTIONS or {}
-AutoCook.OPTIONS.MaxDuplicate = AutoCook.OPTIONS.MaxDuplicate or 2
+local AutoCook = {}
+AutoCook.LOG_PREFIX = "[Modelus][AutoCook]"
+AutoCook.MaxDuplicate = 2
 
 -- ---------------------------------------------------------------------------
--- Private: ModelusAutoCookContinue
+-- Logging helper
+-- ---------------------------------------------------------------------------
+
+local function log(msg)
+    print(AutoCook.LOG_PREFIX .. " " .. tostring(msg))
+end
+
+-- ---------------------------------------------------------------------------
+-- ModelusAutoCookContinue timed action
 -- Zero-duration timed action that re-enters session:continue() after the
--- previous ISAddItemInRecipe finishes.  Named with the "Modelus" namespace to
--- avoid colliding with any third-party ISContinue global.
+-- previous ISAddItemInRecipe finishes.
 -- ---------------------------------------------------------------------------
 
-local ModelusAutoCookContinue = ISBaseTimedAction:derive("ModelusAutoCookContinue")
+ModelusAutoCookContinue = ISBaseTimedAction:derive("ModelusAutoCookContinue")
+
+function ModelusAutoCookContinue:new(player, session)
+    local o = ISBaseTimedAction.new(self, player)
+    setmetatable(o, self)
+    self.__index = self
+    o.player     = player
+    o.session    = session
+    o.stopOnWalk = false
+    o.stopOnRun  = false
+    o.maxTime    = 1
+    return o
+end
 
 function ModelusAutoCookContinue:isValid()
-    return self.session ~= nil
-        and self.session.baseItem ~= nil
-        and not self.session.baseItem:isRemoved()
+    if not self.session then return false end
+    if not self.session.baseItem then return false end
+    if self.session.baseItem:isRemoved() then return false end
+    return true
 end
 
 function ModelusAutoCookContinue:update()
-    -- zero-duration: nothing to tick
 end
 
 function ModelusAutoCookContinue:start()
-    logDebug("ModelusAutoCookContinue:start")
 end
 
 function ModelusAutoCookContinue:stop()
-    logDebug("ModelusAutoCookContinue:stop")
     ISBaseTimedAction.stop(self)
 end
 
 function ModelusAutoCookContinue:perform()
-    logDebug("ModelusAutoCookContinue:perform")
+    self.session:continue()
     ISBaseTimedAction.perform(self)
-    if self.session then
-        self.session:continue()
-    end
-end
-
-function ModelusAutoCookContinue:new(session, character)
-    local o = ISBaseTimedAction.new(self, character)
-    setmetatable(o, self)
-    self.__index = self
-    o.session      = session
-    o.character    = character
-    o.stopOnWalk   = false
-    o.stopOnRun    = false
-    o.maxTime      = 1
-    return o
 end
 
 -- ---------------------------------------------------------------------------
--- Private: Session
--- Holds per-click state: player, recipe, baseItem, usage counters.
--- Discarded naturally when the chain ends (no modData written).
+-- AutoCook.Session
 -- ---------------------------------------------------------------------------
 
-local Session = {}
-Session.__index = Session
+AutoCook.Session = {}
+AutoCook.Session.__index = AutoCook.Session
 
-function Session.new(player, recipe, baseItem)
-    local s = setmetatable({}, Session)
-    s.playerObj = player
-    s.recipe    = recipe
-    s.baseItem  = baseItem
-    s.addAction = nil
-    s.usedItems = {}   -- map: fullType -> count
-    local recipeName = recipe
-    if recipe and recipe.getUntranslatedName then
-        recipeName = recipe:getUntranslatedName()
-    end
-    logDebug("Session.new recipe=" .. tostring(recipeName))
+function AutoCook.Session:new(player, recipe, baseItem, containerList)
+    local s = setmetatable({}, AutoCook.Session)
+    s.player        = player
+    s.recipe        = recipe
+    s.baseItem      = baseItem
+    s.containerList = containerList
+    s.useCounts     = {}
+    s.addAction     = nil
     return s
 end
 
---- Returns the number of times this fullType has been queued this session.
-function Session:countUsed(fullType)
-    return self.usedItems[fullType] or 0
-end
+-- ---------------------------------------------------------------------------
+-- Session:pickCandidate()
+-- Variety-first selection; tie-break by freshness.
+-- ---------------------------------------------------------------------------
 
---- Increments the usage counter for a fullType.
-function Session:markUsed(fullType)
-    self.usedItems[fullType] = (self.usedItems[fullType] or 0) + 1
-end
-
---- Returns true when the item passes all v1 safety filters.
-function Session:filterCandidate(item)
-    if not instanceof(item, "Food") then
-        return false
-    end
-    if item:isSpice() then
-        return false
-    end
-    if item:isRotten() then
-        return false
-    end
-    if self.playerObj:isKnownPoison(item) then
-        return false
-    end
-    -- Dangerous-uncooked items may only be added to a cookable recipe.
-    if item:isbDangerousUncooked() and not item:isCooked() then
-        if not self.recipe:isCookable() then
-            return false
-        end
-    end
-    return true
-end
-
---- Freshness heuristic: higher is fresher.
---- Uses remaining shelf life (offAgeMax - age) when available, else 0.
 local function freshnessScore(item)
     local offAgeMax = item:getOffAgeMax()
     local age       = item:getAge()
     return offAgeMax - age
 end
 
---- Variety-first selection: bucket candidates by usage count (ascending),
---- walk buckets up to MaxDuplicate, pick freshest item in first non-empty bucket.
---- Returns chosen item or nil.
-function Session:chooseItem(items)
-    if not items or items:size() == 0 then
+function AutoCook.Session:pickCandidate()
+    local items
+    local ok, err = pcall(function()
+        items = self.recipe:getItemsCanBeUse(self.player, self.baseItem, self.containerList)
+    end)
+    if not ok or not items then
+        log("pickCandidate: getItemsCanBeUse error: " .. tostring(err))
         return nil
     end
 
-    -- Build buckets: buckets[usageCount+1] = { item, ... }
-    local buckets = {}
-    for i = 1, items:size() do
-        local item = items:get(i - 1)
-        if self:filterCandidate(item) then
-            local bucket = self:countUsed(item:getFullType()) + 1
-            if bucket <= AutoCook.OPTIONS.MaxDuplicate then
-                if not buckets[bucket] then buckets[bucket] = {} end
-                table.insert(buckets[bucket], item)
-            end
-        end
-    end
+    local best        = nil
+    local bestCount   = AutoCook.MaxDuplicate + 1
+    local bestFresh   = -9999
 
-    -- Walk from bucket 1 (least used types) upward.
-    for b = 1, AutoCook.OPTIONS.MaxDuplicate do
-        local list = buckets[b]
-        if list and #list > 0 then
-            -- Pick freshest in this bucket.
-            local best = list[1]
-            for i = 2, #list do
-                if freshnessScore(list[i]) > freshnessScore(best) then
-                    best = list[i]
+    for i = 0, items:size() - 1 do
+        local item = items:get(i)
+        if item then
+            -- Must be food
+            if not instanceof(item, "Food") then
+                -- skip non-food
+            else
+                -- Reject frozen when not allowed
+                local frozen = false
+                if item.isFrozen then
+                    frozen = item:isFrozen()
+                end
+                local allowFrozen = true
+                if self.recipe.isAllowFrozenItem then
+                    allowFrozen = self.recipe:isAllowFrozenItem()
+                end
+                if frozen and not allowFrozen then
+                    -- skip frozen
+                elseif false then
+                    -- placeholder
+                else
+                    -- Reject needToBeCooked
+                    local needCooked = false
+                    if self.recipe.needToBeCooked then
+                        local ok2, val = pcall(function() return self.recipe:needToBeCooked(item) end)
+                        if ok2 then needCooked = val end
+                    end
+
+                    if needCooked then
+                        -- skip
+                    else
+                        -- Reject rotten
+                        local rotten = false
+                        if item.isRotten then
+                            local ok3, val = pcall(function() return item:isRotten() end)
+                            if ok3 then rotten = val end
+                        end
+
+                        -- Reject poisoned
+                        local poisoned = false
+                        if self.player.isKnownPoison then
+                            local ok4, val = pcall(function() return self.player:isKnownPoison(item) end)
+                            if ok4 then poisoned = val end
+                        end
+
+                        if not rotten and not poisoned then
+                            local fullType = item:getFullType()
+                            local count = self.useCounts[fullType] or 0
+
+                            if count < AutoCook.MaxDuplicate then
+                                local fresh = freshnessScore(item)
+                                -- variety-first: prefer lower count; tie-break by freshness
+                                if count < bestCount or (count == bestCount and fresh > bestFresh) then
+                                    best      = item
+                                    bestCount = count
+                                    bestFresh = fresh
+                                end
+                            end
+                        end
+                    end
                 end
             end
-            logDebug("Session:chooseItem → " .. tostring(best:getFullType()) .. " bucket=" .. b)
-            return best
         end
     end
 
-    logDebug("Session:chooseItem → nil (no valid candidate within MaxDuplicate)")
-    return nil
+    return best
 end
 
---- Main loop body. Called by ModelusAutoCookContinue:perform() after each
---- ISAddItemInRecipe finishes.
-function Session:continue()
-    -- Update baseItem in case ISAddItemInRecipe swapped it (stage completion).
-    if self.addAction and self.addAction.baseItem then
-        self.baseItem = self.addAction.baseItem
-        logDebug("Session:continue baseItem updated to " .. tostring(self.baseItem:getName()))
-    end
+-- ---------------------------------------------------------------------------
+-- Session:start() -- begins the auto-cook chain
+-- ---------------------------------------------------------------------------
 
-    if not self.baseItem or self.baseItem:isRemoved() then
-        logDebug("Session:continue baseItem gone — stopping")
-        return
-    end
+function AutoCook.Session:start()
+    log("chain start on " .. tostring(self.baseItem:getName()))
 
-    logDebug("Session:continue on " .. tostring(self.baseItem:getName()))
-
-    local containerList = ISInventoryPaneContextMenu.getContainers(self.playerObj)
-    if not containerList then
-        logDebug("Session:continue no containers — stopping")
-        return
-    end
-
-    local items = self.recipe:getItemsCanBeUse(self.playerObj, self.baseItem, containerList)
-    local chosen = self:chooseItem(items)
-    if items and items.clear then items:clear() end   -- release Java references
-
+    local chosen = self:pickCandidate()
     if not chosen then
-        logDebug("Session:continue no candidate chosen — stopping cleanly")
+        log("chain end: no candidates")
         return
     end
 
-    -- Transfer from remote container if necessary.
-    if not self.playerObj:getInventory():contains(chosen) then
-        logDebug("Session:continue queuing transfer for " .. tostring(chosen:getFullType()))
+    -- Transfer base item to player inventory if needed
+    if not self.player:getInventory():contains(self.baseItem) then
         ISTimedActionQueue.add(
-            ISInventoryTransferAction:new(self.playerObj, chosen, chosen:getContainer(), self.playerObj:getInventory(), nil)
+            ISInventoryTransferAction:new(self.player, self.baseItem, self.baseItem:getContainer(), self.player:getInventory(), 1)
         )
     end
 
-    -- Mark the type used BEFORE queuing so the next iteration sees it.
-    self:markUsed(chosen:getFullType())
+    -- Transfer ingredient if needed
+    if not self.player:getInventory():contains(chosen) then
+        ISTimedActionQueue.add(
+            ISInventoryTransferAction:new(self.player, chosen, chosen:getContainer(), self.player:getInventory(), 1)
+        )
+    end
 
-    -- Queue the vanilla add-ingredient action.
-    local cookingPerk = self.playerObj:getPerkLevel(Perks.Cooking) or 0
-    self.addAction = ISAddItemInRecipe:new(self.playerObj, self.recipe, self.baseItem, chosen, 70 - cookingPerk)
-    logDebug("Session:continue queuing ISAddItemInRecipe for " .. tostring(chosen:getFullType()))
+    -- Track usage
+    local fullType = chosen:getFullType()
+    self.useCounts[fullType] = (self.useCounts[fullType] or 0) + 1
+
+    -- Queue add-ingredient action
+    self.addAction = ISAddItemInRecipe:new(self.player, self.recipe, self.baseItem, chosen)
+    log("queuing ISAddItemInRecipe for " .. tostring(fullType))
     ISTimedActionQueue.add(self.addAction)
 
-    -- Re-queue ourselves so we fire after the add action completes.
-    ISTimedActionQueue.add(ModelusAutoCookContinue:new(self, self.playerObj))
+    -- Queue continue action
+    ISTimedActionQueue.add(ModelusAutoCookContinue:new(self.player, self))
+end
+
+-- ---------------------------------------------------------------------------
+-- Session:continue() -- called by ModelusAutoCookContinue:perform()
+-- ---------------------------------------------------------------------------
+
+function AutoCook.Session:continue()
+    -- Refresh baseItem in case ISAddItemInRecipe swapped it
+    if self.addAction then
+        if self.addAction.baseItem then
+            self.baseItem = self.addAction.baseItem
+        end
+    end
+
+    if not self.baseItem then
+        log("chain end: baseItem is nil")
+        return
+    end
+
+    if self.baseItem:isRemoved() then
+        log("chain end: baseItem removed")
+        return
+    end
+
+    -- Check if recipe is full
+    local curItems = 0
+    local maxItems = 0
+    if self.recipe.getCurrentItems then
+        local ok1, v1 = pcall(function() return self.recipe:getCurrentItems() end)
+        if ok1 then curItems = v1 end
+    end
+    if self.recipe.getMaxIngredients then
+        local ok2, v2 = pcall(function() return self.recipe:getMaxIngredients() end)
+        if ok2 then maxItems = v2 end
+    end
+
+    if maxItems > 0 and curItems >= maxItems then
+        log("chain end: recipe full (" .. curItems .. "/" .. maxItems .. ")")
+        return
+    end
+
+    local chosen = self:pickCandidate()
+    if not chosen then
+        log("chain end: no candidates")
+        return
+    end
+
+    -- Transfer ingredient if needed
+    if not self.player:getInventory():contains(chosen) then
+        ISTimedActionQueue.add(
+            ISInventoryTransferAction:new(self.player, chosen, chosen:getContainer(), self.player:getInventory(), 1)
+        )
+    end
+
+    -- Track usage
+    local fullType = chosen:getFullType()
+    self.useCounts[fullType] = (self.useCounts[fullType] or 0) + 1
+
+    -- Queue add-ingredient action
+    self.addAction = ISAddItemInRecipe:new(self.player, self.recipe, self.baseItem, chosen)
+    log("queuing ISAddItemInRecipe for " .. tostring(fullType))
+    ISTimedActionQueue.add(self.addAction)
+
+    -- Queue next continue
+    ISTimedActionQueue.add(ModelusAutoCookContinue:new(self.player, self))
 end
 
 -- ---------------------------------------------------------------------------
 -- Context-menu hook
 -- ---------------------------------------------------------------------------
 
---- Returns the first active evolved recipe for `item`, or nil.
-local function getActiveRecipe(item)
-    -- B42 primary path: single evolved recipe accessor.
-    if item.getEvolvedRecipe then
-        local r = item:getEvolvedRecipe()
-        if r then return r end
-    end
-    -- Fallback: iterate all evolved recipes, pick first.
-    if item.getEvolvedRecipes then
-        local list = item:getEvolvedRecipes()
-        if list and list.size and list:size() > 0 then
-            return list:get(0)
-        end
-    end
-    return nil
-end
-
 local function onFillInventoryObjectContextMenu(playerNum, context, items)
-    -- Only act on a single-item selection.
+    -- Only act on a single-item selection
     if not items or #items ~= 1 then return end
 
     local stack = items[1]
-    -- items[] entries can be a stack table or a bare item; normalise.
-    local item = stack.items and stack.items[1] or stack
+    -- Entries can be a stack table or a bare item; normalise
+    local item = stack
+    if stack.items then
+        item = stack.items[1]
+    end
 
-    if not item or not instanceof(item, "Food") then return end
-
-    local recipe = getActiveRecipe(item)
-    if not recipe then return end
+    if not item then return end
+    if not instanceof(item, "Food") then return end
 
     local player = getSpecificPlayer(playerNum)
     if not player then return end
 
-    -- Hide option when recipe is already at capacity.
-    local maxItems = recipe:getMaxItems()
-    local curItems = 0
-    local extra = item:getExtraItems()
-    if extra and extra.size then curItems = extra:size() end
+    local containerList = ISInventoryPaneContextMenu.getContainers(player)
+    if not containerList then
+        log("no containers for player " .. tostring(playerNum))
+        return
+    end
 
-    local option = context:addOption(
-        getText("ContextMenu_AutoCook"),
-        player,
-        function(playerObj, _recipe, baseItem)
-            logDebug("context menu clicked — starting session")
-            local session = Session.new(playerObj, _recipe, baseItem)
-            session:continue()
-        end,
-        recipe,
-        item
-    )
+    if not RecipeManager then return end
+    if not RecipeManager.getEvolvedRecipe then return end
 
-    if maxItems > 0 and curItems >= maxItems then
-        option.notAvailable = true
-        logDebug("onFillInventoryObjectContextMenu: recipe full — option disabled")
-    else
-        logDebug("onFillInventoryObjectContextMenu: option added for " .. tostring(item:getType()))
+    local ok, recipeList = pcall(function()
+        return RecipeManager.getEvolvedRecipe(item, player, containerList, false)
+    end)
+    if not ok or not recipeList then return end
+    if recipeList:size() == 0 then return end
+
+    log(recipeList:size() .. " evolved recipe(s) for " .. tostring(item:getType()))
+
+    for ri = 0, recipeList:size() - 1 do
+        local recipe = recipeList:get(ri)
+        if recipe then
+            -- Check if recipe is full
+            local curItems = 0
+            local maxItems = 0
+            if recipe.getCurrentItems then
+                local ok1, v1 = pcall(function() return recipe:getCurrentItems() end)
+                if ok1 then curItems = v1 end
+            end
+            if recipe.getMaxIngredients then
+                local ok2, v2 = pcall(function() return recipe:getMaxIngredients() end)
+                if ok2 then maxItems = v2 end
+            end
+
+            local isFull = (maxItems > 0 and curItems >= maxItems)
+
+            -- Build option label
+            local recipeName = "Auto Cook"
+            if recipe.getUntranslatedName then
+                local ok3, rname = pcall(function() return recipe:getUntranslatedName() end)
+                if ok3 and rname and rname ~= "" then
+                    recipeName = "Auto Cook (" .. rname .. ")"
+                end
+            end
+
+            -- Capture loop variables for the closure
+            local capturedRecipe = recipe
+            local capturedItem   = item
+
+            local option = context:addOption(
+                recipeName,
+                nil,
+                function()
+                    local session = AutoCook.Session:new(player, capturedRecipe, capturedItem, containerList)
+                    session:start()
+                end
+            )
+
+            if isFull then
+                option.notAvailable = true
+                log("option disabled: recipe full")
+            else
+                log("option added: " .. tostring(recipeName))
+            end
+        end
     end
 end
 
 Events.OnFillInventoryObjectContextMenu.Add(onFillInventoryObjectContextMenu)
+
+print(AutoCook.LOG_PREFIX .. " loaded; context hook registered")
