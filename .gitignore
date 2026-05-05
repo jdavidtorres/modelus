@@ -45,3 +45,7 @@ out/
 
 # Agent Teams Lite registry
 .atl/
+/java/.gradle
+/java/gradle
+java/gradlew.bat
+java/gradlew
