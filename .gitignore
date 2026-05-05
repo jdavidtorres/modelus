@@ -49,3 +49,4 @@ out/
 /java/gradle
 java/gradlew.bat
 java/gradlew
+*.jar
