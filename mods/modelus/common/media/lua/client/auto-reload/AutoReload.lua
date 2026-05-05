@@ -29,14 +29,57 @@ AutoReload.reloading = false
 --- Return the first stack of ammo matching `ammoType` anywhere on the player,
 --- including all bags and sub-containers (recursive search).
 local function getAmmoItem(player, ammoType)
-    return player:getInventory():getFirstTypeRecurse(ammoType)
+    if not player or not ammoType then return nil end
+
+    local ammoKey = ammoType
+    if type(ammoType) ~= "string" then
+        local ok, key = pcall(function()
+            if ammoType.getItemKey then
+                return ammoType:getItemKey()
+            end
+            return tostring(ammoType)
+        end)
+        if not ok or not key then
+            logDebug("getAmmoItem: could not resolve ammo key from " .. tostring(ammoType))
+            return nil
+        end
+        ammoKey = key
+    end
+
+    ammoKey = tostring(ammoKey)
+    if ammoKey:find("%.") then
+        ammoKey = ammoKey:match("%.(.+)$") or ammoKey
+    elseif ammoKey:find(":") then
+        local mapped = {
+            ["base:bullets_556"] = "556Bullets",
+            ["base:bullets_3030"] = "3030Bullets",
+            ["base:bullets_308"] = "308Bullets",
+            ["base:bullets_44"] = "Bullets44",
+            ["base:bullets_9mm"] = "Bullets9mm",
+            ["base:bullets_38"] = "Bullets38",
+            ["base:bullets_45"] = "Bullets45",
+            ["base:bullets_357"] = "Bullets357",
+        }
+        ammoKey = mapped[ammoKey] or ammoKey
+    end
+
+    local ok, item = pcall(function()
+        return player:getInventory():getFirstTypeRecurse(ammoKey)
+    end)
+    if not ok then
+        logDebug("getAmmoItem: getFirstTypeRecurse failed for " .. tostring(ammoKey))
+        return nil
+    end
+    return item
 end
 
 --- True when the action queue is empty and the player is not performing
 --- any action (safe to enqueue a new timed action).
 local function isQueueIdle(player)
-    return ISTimedActionQueue.isQueued(player, nil) == false
-       and not player:getTimedActionQueue():isEmpty() == false
+    if ISTimedActionQueue.isPlayerDoingAction then
+        return not ISTimedActionQueue.isPlayerDoingAction(player)
+    end
+    return true
 end
 
 -- ---------------------------------------------------------------------------
@@ -76,7 +119,7 @@ local function onPlayerUpdate(player)
     if AutoReload.reloading then return end
 
     -- Skip if action queue is busy (player doing something else).
-    if not player:getTimedActionQueue():isEmpty() then
+    if ISTimedActionQueue.isPlayerDoingAction and ISTimedActionQueue.isPlayerDoingAction(player) then
         logDebug("onPlayerUpdate: queue busy — skipping")
         return
     end

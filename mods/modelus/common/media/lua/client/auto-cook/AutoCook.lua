@@ -8,6 +8,7 @@
 -- Hook: Events.OnFillInventoryObjectContextMenu (additive, no patching).
 -- Scope: client only.
 
+require "TimedActions/ISBaseTimedAction"
 require "TimedActions/ISAddItemInRecipe"
 require "TimedActions/ISInventoryTransferAction"
 
@@ -140,8 +141,8 @@ function AutoCook.Session:pickCandidate()
                         if ok2 then needCooked = val end
                     end
 
-                    if needCooked then
-                        -- skip
+                    if not needCooked then
+                        -- skip: item doesn't need cooking → not valid for this recipe
                     else
                         -- Reject rotten
                         local rotten = false
