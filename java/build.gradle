@@ -11,7 +11,64 @@ java {
     }
 }
 
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+test {
+    useJUnitPlatform()
+}
+
 tasks.named('jar') {
     archiveBaseName = 'modelus'
     destinationDirectory = file('../mods/modelus/common/media/java')
+}
+
+// ── validateWeightReducer ─────────────────────────────────────────────────────
+// Runs all WeightValidationRule implementations and fails the build on errors.
+tasks.register('validateWeightReducer', JavaExec) {
+    group = 'verification'
+    description = 'Run weight-reducer catalog validation rules.'
+
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.modelus.validation.WeightReducerValidationRunner'
+
+    // Optional: set PZ_SCRIPTS_PATH env var to cross-reference B42 item scripts.
+    // environment 'PZ_SCRIPTS_PATH', '/path/to/pz/media/scripts'
+}
+
+// ── generateWeightReducerLua ──────────────────────────────────────────────────
+// Generates WeightReducerCatalog.generated.lua from Java catalog source of truth.
+tasks.register('generateWeightReducerLua', JavaExec) {
+    group = 'build'
+    description = 'Generate WeightReducerCatalog.generated.lua from Java catalog.'
+
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.modelus.validation.LuaFallbackGenerator'
+    // Pass project root so the generator writes to the correct path
+    args = [rootProject.projectDir.parentFile.absolutePath]
+}
+
+// ── checkWeightReducerLuaDrift ────────────────────────────────────────────────
+// Fails the build if the committed WeightReducerCatalog.generated.lua differs
+// from what LuaFallbackGenerator would produce from the current Java catalog.
+// Detects stale committed files before they reach production / CI.
+tasks.register('checkWeightReducerLuaDrift', JavaExec) {
+    group = 'verification'
+    description = 'Fail build if committed generated Lua file differs from Java catalog output.'
+
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.modelus.validation.LuaDriftChecker'
+    args = [rootProject.projectDir.parentFile.absolutePath]
+}
+
+// ── Ensure check runs validation and generation parity ────────────────────────
+tasks.named('check') {
+    dependsOn validateWeightReducer
+    dependsOn checkWeightReducerLuaDrift
 }
