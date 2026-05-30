@@ -3,7 +3,7 @@ plugins {
 }
 
 group = 'com.modelus'
-version = '0.6.14'
+version = '0.7.30'
 
 java {
     toolchain {

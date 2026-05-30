@@ -12,6 +12,9 @@ local function modelusBootstrap()
     print("[Modelus] auto-eat:         active (eats prepared meals when hungry)")
     print("[Modelus] free-hotwiring:   active")
     print("[Modelus] casual-reloading: active")
+    print("[Modelus] equipped-container-coupling: active (hotbar couples items inside equipped containers)")
+    print("[Modelus] strength-carry-bonus: active (+5 kg carry capacity per Strength level)")
+    print("[Modelus] ammo-hud-counter:     active (shows ammo near cursor while aiming)")
 
     if not luajava then
         print("[Modelus] luajava is not available in this context")
@@ -23,6 +26,9 @@ local function modelusBootstrap()
         print("[Modelus] Could not bind Java bridge class: " .. tostring(javaBridge))
         return
     end
+
+    -- Expose ModelusBridge globally so all Lua modules can access it (client, server, shared)
+    _G.ModelusBridge = javaBridge
 
     local success, message = pcall(javaBridge.onLuaBootstrap, "Project Zomboid")
     if success then

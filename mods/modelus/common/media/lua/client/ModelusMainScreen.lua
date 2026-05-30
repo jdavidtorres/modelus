@@ -14,7 +14,7 @@ MainScreen.render = function(self)
     local font = UIFont.Medium
 
     -- The text we want to draw
-    local versionText = "Modelus v0.6.2"
+    local versionText = "Modelus v0.7.30"
 
     -- Get dimensions
     local textHeight = textManager:getFontFromEnum(font):getLineHeight()
