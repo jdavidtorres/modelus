@@ -190,16 +190,17 @@ function AmmoCounter.OnRenderTick()
     local x = mx + AmmoCounter.config.offsetX
     local y = my + AmmoCounter.config.offsetY
 
-    -- Draw the ammo text. Prefer UIManager.DrawStringCentred; fall back to
-    -- getTextManager():DrawString if the first form is unavailable.
-    local okDraw = pcall(function()
-        UIManager.DrawStringCentred(UIFont.Small, text, x, y, 1, 1, 1, 0.9)
-    end)
-    if not okDraw then
-        pcall(function()
-            getTextManager():DrawString(UIFont.Small, x, y, text, 1, 1, 1, 0.9)
-        end)
+    -- Lazy-initialize the cached TextDrawObject (avoids per-frame allocation).
+    -- Configure default color once; ReadString uses flag -1 to apply object-state colors.
+    if not AmmoCounter._textObj then
+        AmmoCounter._textObj = TextDrawObject.new()
+        AmmoCounter._textObj:setDefaultColors(1, 1, 1, 0.9)
     end
+    -- Queue the ammo text to the render pipeline via the supported batched draw path.
+    pcall(function()
+        AmmoCounter._textObj:ReadString(UIFont.Small, text, -1)
+        AmmoCounter._textObj:AddBatchedDraw(x, y, true)
+    end)
 end
 
 -- ---------------------------------------------------------------------------

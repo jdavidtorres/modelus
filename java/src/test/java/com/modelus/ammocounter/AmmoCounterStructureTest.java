@@ -205,6 +205,115 @@ class AmmoCounterStructureTest {
                 "OnRenderTick must read mouse coordinates for near-cursor text drawing");
     }
 
+    // ── Render backend contract ───────────────────────────────────────────────
+
+    @Test
+    void render_uses_TextDrawObject() {
+        assertTrue(luaContent.contains("TextDrawObject"),
+                "AmmoCounter must use TextDrawObject for cursor HUD rendering (not UIManager.DrawStringCentred)");
+    }
+
+    @Test
+    void render_uses_ReadString() {
+        assertTrue(luaContent.contains("ReadString"),
+                "AmmoCounter must call ReadString on the TextDrawObject to update the display text");
+    }
+
+    @Test
+    void render_uses_AddBatchedDraw() {
+        assertTrue(luaContent.contains("AddBatchedDraw"),
+                "AmmoCounter must call AddBatchedDraw to queue the text draw into the render pipeline");
+    }
+
+    @Test
+    void render_rejects_UIManager_DrawStringCentred() {
+        assertFalse(luaContent.contains("UIManager.DrawStringCentred"),
+                "AmmoCounter must NOT use UIManager.DrawStringCentred (unsupported API during OnRenderTick)");
+    }
+
+    @Test
+    void render_rejects_getTextManager_DrawString() {
+        assertFalse(luaContent.contains("getTextManager():DrawString"),
+                "AmmoCounter must NOT use getTextManager():DrawString (unsupported legacy fallback)");
+    }
+
+    @Test
+    void render_caches_textObj_on_module_table() {
+        assertTrue(luaContent.contains("AmmoCounter._textObj"),
+                "TextDrawObject must be cached on the AmmoCounter module table (not a local variable) to avoid per-frame allocation");
+    }
+
+    @Test
+    void render_AddBatchedDraw_does_not_use_unsupported_six_arg_form() {
+        // TextDrawObject:AddBatchedDraw(x, y, r, g, b, a) is NOT a valid Lua/Java binding.
+        // Only AddBatchedDraw(x, y) is exposed. Color args belong in ReadString.
+        // This guards against re-introducing the invalid 6-arg overload that causes runtime nil errors.
+        assertFalse(luaContent.contains("AddBatchedDraw(x, y, 1, 1, 1"),
+                "AddBatchedDraw must NOT use the unsupported 6-arg (x,y,r,g,b,a) form — only (x, y) is a valid Lua binding");
+    }
+
+    @Test
+    void render_ReadString_uses_flag_mode() {
+        // ReadString(UIFont, text, -1) instructs the engine to use colors pre-configured on
+        // the TextDrawObject via setDefaultColor. The -1 flag is the only supported form in
+        // this PZ runtime; the 6-arg inline RGBA form has no exposed Lua/Java binding.
+        assertTrue(luaContent.contains(":ReadString(UIFont.Small, text, -1)"),
+                "ReadString must use the -1 flag (object-state colors), not inline RGBA arguments");
+    }
+
+    @Test
+    void render_ReadString_rejects_inline_rgba() {
+        // ReadString(UIFont, text, 1, 1, 1, ...) is not a valid 6-arg Lua binding.
+        // Passing inline RGBA causes a runtime nil-call. Colors must be set via setDefaultColor.
+        // Triangulates render_ReadString_uses_flag_mode from the negative direction.
+        assertFalse(luaContent.contains(":ReadString(UIFont.Small, text, 1"),
+                "ReadString must NOT use inline RGBA color args — colors must be configured via object state");
+    }
+
+    @Test
+    void render_ReadString_does_not_use_flag_zero() {
+        // ReadString(UIFont, text, 0) uses flag 0 instead of -1 — wrong call pattern.
+        // Triangulates render_ReadString_uses_flag_mode from the negative direction (wrong flag).
+        assertFalse(luaContent.contains(":ReadString(UIFont.Small, text, 0)"),
+                "ReadString must NOT use flag 0 — the correct flag is -1 (use object-state colors)");
+    }
+
+    @Test
+    void render_configures_color_via_object_state() {
+        // Colors must be set on the TextDrawObject via setDefaultColors (plural) before ReadString is called.
+        // The valid runtime binding is setDefaultColors, not the singular setDefaultColor.
+        // ReadString uses flag -1 to read the colors pre-configured here.
+        assertTrue(luaContent.contains("setDefaultColors"),
+                "TextDrawObject must have color configured via setDefaultColors (plural, object state), not inline ReadString args");
+    }
+
+    @Test
+    void render_rejects_setDefaultColor_singular() {
+        // setDefaultColor (singular) is NOT a valid Lua/Java binding on TextDrawObject in this PZ runtime.
+        // Calling it causes 'Object tried to call nil in OnRenderTick' at runtime.
+        // The correct method is setDefaultColors (plural).
+        // This negative guard prevents the naming mistake from silently regressing.
+        assertFalse(luaContent.contains(":setDefaultColor("),
+                "AmmoCounter must NOT call :setDefaultColor( (singular) — the valid binding is :setDefaultColors( (plural)");
+    }
+
+    @Test
+    void render_setDefaultColors_configures_visible_color() {
+        // setDefaultColors must supply non-transparent visible values (e.g. r=1,g=1,b=1).
+        // Calling setDefaultColors(0,0,0,0) or omitting valid RGBA would make the text invisible.
+        // Triangulates render_configures_color_via_object_state with concrete expected values.
+        assertTrue(luaContent.contains("setDefaultColors(1, 1, 1"),
+                "setDefaultColors must configure white visible text (r=1, g=1, b=1) — transparent/zero values produce invisible HUD");
+    }
+
+    @Test
+    void render_AddBatchedDraw_uses_three_arg_form() {
+        // AddBatchedDraw(x, y, true) is the supported 3-arg form for this PZ runtime.
+        // The boolean third argument is required; the bare 2-arg (x, y) form is not valid here.
+        assertTrue(luaContent.contains(":AddBatchedDraw(x, y, true)"),
+                "AddBatchedDraw must use the 3-arg (x, y, true) form supported by this runtime");
+    }
+
     // ── Reserve scan: inventory access ───────────────────────────────────────
 
     @Test
