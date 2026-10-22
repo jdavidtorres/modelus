@@ -1,8 +1,14 @@
 package com.modelus.bridge;
 
 import com.modelus.ammoconverter.AmmoConverterBridge;
+import com.modelus.autoloot.AutoLootBridge;
+import com.modelus.autoeat.AutoEatBridge;
 import com.modelus.weight.WeightReducerCatalog;
+import java.util.ArrayList;
 import zombie.characters.IsoPlayer;
+import zombie.entity.components.crafting.recipe.CraftRecipeData;
+import zombie.inventory.InventoryItem;
+import zombie.inventory.ItemContainer;
 
 public final class ModelusBridge {
     private ModelusBridge() {
@@ -34,5 +40,29 @@ public final class ModelusBridge {
 
     public static String weightReducerValidationSummary() {
         return WeightReducerCatalog.validationSummary();
+    }
+
+    public static InventoryItem autoEatCreatedOutput(CraftRecipeData recipeData, String expectedType) {
+        return AutoEatBridge.createdOutput(recipeData, expectedType);
+    }
+
+    public static AutoEatBridge.PendingCan autoEatBeginOpen() {
+        return new AutoEatBridge.PendingCan();
+    }
+
+    public static boolean autoLootIsSelected(IsoPlayer player, String fullType) {
+        return AutoLootBridge.isTypeAllowed(player, fullType);
+    }
+
+    public static boolean autoLootToggleType(IsoPlayer player, String fullType) {
+        return AutoLootBridge.toggleTypeAllowed(player, fullType);
+    }
+
+    public static ArrayList<InventoryItem> autoLootCandidates(IsoPlayer player, ItemContainer source) {
+        return AutoLootBridge.selectCandidates(player, source);
+    }
+
+    public static boolean autoLootCanCollect(IsoPlayer player, InventoryItem item) {
+        return AutoLootBridge.canCollect(player, item);
     }
 }

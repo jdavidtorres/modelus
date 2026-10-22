@@ -21,6 +21,14 @@ public final class LuaDriftChecker {
     private LuaDriftChecker() {
     }
 
+    static boolean hasDrift(String actual, String expected) {
+        return !normalizeLineEndings(actual).equals(normalizeLineEndings(expected));
+    }
+
+    private static String normalizeLineEndings(String content) {
+        return content.replace("\r\n", "\n");
+    }
+
     public static void main(String[] args) throws IOException {
         String projectRoot = args.length > 0 ? args[0] : ".";
         Path committed = Path.of(projectRoot)
@@ -38,11 +46,11 @@ public final class LuaDriftChecker {
         String committedContent = Files.readString(committed, StandardCharsets.UTF_8);
         String expectedContent  = LuaFallbackGenerator.buildLua();
 
-        if (!committedContent.equals(expectedContent)) {
+        if (hasDrift(committedContent, expectedContent)) {
             System.err.println("[LuaDriftChecker] FAIL — committed Lua file is out of sync with Java catalog.");
             System.err.println("  Committed:  " + committed);
             System.err.println("  Run: ./gradlew generateWeightReducerLua  to regenerate and re-commit.");
-            printDiffHint(committedContent, expectedContent);
+            printDiffHint(normalizeLineEndings(committedContent), normalizeLineEndings(expectedContent));
             System.exit(1);
         }
 

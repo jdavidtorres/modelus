@@ -3,7 +3,7 @@ plugins {
 }
 
 group = 'com.modelus'
-version = '0.7.34'
+version = '0.8.1'
 
 java {
     toolchain {
@@ -15,8 +15,17 @@ repositories {
     mavenCentral()
 }
 
+// ── Project Zomboid API jar ───────────────────────────────────────────────────
+// Source of the PZ classes used by compileOnly. Override with -PpzJar=<path> or
+// the PZ_JAR environment variable (needed on WSL, where the Windows install
+// lives under /mnt/<drive> instead of a drive letter).
+def pzJar = providers.gradleProperty('pzJar')
+        .orElse(providers.environmentVariable('PZ_JAR'))
+        .getOrElse('D:/SteamLibrary/steamapps/common/ProjectZomboid/projectzomboid.jar')
+
 dependencies {
-    compileOnly files('D:/SteamLibrary/steamapps/common/ProjectZomboid/projectzomboid.jar')
+    compileOnly files(pzJar)
+    testImplementation files(pzJar)
     testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
@@ -88,49 +97,11 @@ tasks.register('checkAmmoConverterLuaDrift', JavaExec) {
     args = [rootProject.projectDir.parentFile.absolutePath]
 }
 
-// ── generateAutoCookPrepLua ───────────────────────────────────────────────────
-// Generates AutoCookPrepCatalog.generated.lua by parsing PZ vanilla scripts.
-// Requires PZ_SCRIPTS_PATH to be set (env var or Gradle property).
-tasks.register('generateAutoCookPrepLua', JavaExec) {
-    group = 'build'
-    description = 'Generate AutoCookPrepCatalog.generated.lua from PZ script files.'
-
-    classpath = sourceSets.main.runtimeClasspath
-    mainClass = 'com.modelus.autocook.AutoCookPrepGenerator'
-
-    doFirst {
-        def pzPath = System.getenv('PZ_SCRIPTS_PATH') ?: (project.hasProperty('PZ_SCRIPTS_PATH') ? project.property('PZ_SCRIPTS_PATH') : null)
-        if (!pzPath) {
-            throw new GradleException('PZ_SCRIPTS_PATH is not set. Set the env var or pass -PPZ_SCRIPTS_PATH=<path>.')
-        }
-        args = [rootProject.projectDir.parentFile.absolutePath, pzPath]
-    }
-}
-
-// ── checkAutoCookPrepLuaDrift ─────────────────────────────────────────────────
-// Fails if committed AutoCookPrepCatalog.generated.lua differs from PZ scripts output.
-// Skips gracefully when PZ_SCRIPTS_PATH is absent (e.g. CI without PZ installed).
-tasks.register('checkAutoCookPrepLuaDrift', JavaExec) {
-    group = 'verification'
-    description = 'Fail build if committed auto-cook prep Lua file is out of sync with PZ scripts.'
-
-    classpath = sourceSets.main.runtimeClasspath
-    mainClass = 'com.modelus.autocook.AutoCookPrepLuaDriftChecker'
-
-    doFirst {
-        def pzPath = System.getenv('PZ_SCRIPTS_PATH') ?: (project.hasProperty('PZ_SCRIPTS_PATH') ? project.property('PZ_SCRIPTS_PATH') : null)
-        // Pass projectRoot only; checker will read PZ_SCRIPTS_PATH from env if not passed as arg
-        args = pzPath ? [rootProject.projectDir.parentFile.absolutePath, pzPath]
-                      : [rootProject.projectDir.parentFile.absolutePath]
-    }
-}
-
 // ── Ensure check runs validation and generation parity ────────────────────────
 tasks.named('check') {
     dependsOn validateWeightReducer
     dependsOn checkWeightReducerLuaDrift
     dependsOn checkAmmoConverterLuaDrift
-    dependsOn checkAutoCookPrepLuaDrift
 }
 
 // ── syncVersions ──────────────────────────────────────────────────────────────

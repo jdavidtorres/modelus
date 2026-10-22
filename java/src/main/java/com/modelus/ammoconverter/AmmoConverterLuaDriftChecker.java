@@ -11,6 +11,14 @@ public final class AmmoConverterLuaDriftChecker {
   private AmmoConverterLuaDriftChecker() {
   }
 
+  static boolean hasDrift(String actual, String expected) {
+    return !normalizeLineEndings(actual).equals(normalizeLineEndings(expected));
+  }
+
+  private static String normalizeLineEndings(String content) {
+    return content.replace("\r\n", "\n");
+  }
+
   public static void main(String[] args) throws IOException {
     String projectRoot = args.length > 0 ? args[0] : ".";
     Path committed = Path.of(projectRoot)
@@ -28,11 +36,11 @@ public final class AmmoConverterLuaDriftChecker {
     String committedContent = Files.readString(committed, StandardCharsets.UTF_8);
     String expectedContent = AmmoConverterLuaGenerator.buildLua();
 
-    if (!committedContent.equals(expectedContent)) {
+    if (hasDrift(committedContent, expectedContent)) {
       System.err.println("[AmmoConverterLuaDriftChecker] FAIL — committed Lua file is out of sync with Java config.");
       System.err.println("  Committed: " + committed);
       System.err.println("  Run: ./gradlew generateAmmoConverterLua to regenerate and re-commit.");
-      printDiffHint(committedContent, expectedContent);
+      printDiffHint(normalizeLineEndings(committedContent), normalizeLineEndings(expectedContent));
       System.exit(1);
     }
 

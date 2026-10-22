@@ -22,11 +22,13 @@ end
 
 AutoEat = AutoEat or {}
 
--- Hunger level (0-100) at which auto-eat triggers.  Higher = hungrier.
-AutoEat.HUNGER_THRESHOLD = 30
+require "auto-eat/AutoEatCans"
+
+-- B42 hunger is a normalized stat in [0, 1]. Higher means hungrier.
+AutoEat.HUNGER_THRESHOLD = 0.30
 
 -- When hunger >= this, eat a full portion; otherwise eat a conservative 50%.
-AutoEat.FULL_EAT_THRESHOLD = 60
+AutoEat.FULL_EAT_THRESHOLD = 0.60
 
 -- Ticks between polls (~3 seconds at 60fps).
 AutoEat.POLL_INTERVAL = 180
@@ -121,15 +123,22 @@ end
 -- ---------------------------------------------------------------------------
 
 --- STRICT filter: item must pass ALL rejection checks AND the prepared-meal gate.
-function AutoEat.isAllowedFood(item, player)
+function AutoEat.isAllowedFood(item, player, expectedCannedOutputType)
     if not item then return false end
 
     -- Must be a Food instance.
     local ok1, isFood = pcall(function() return instanceof(item, "Food") end)
     if not (ok1 and isFood) then return false end
 
+    -- A sealed food item cannot be eaten, even if its script type resembles food.
+    local okScript, scriptItem = pcall(function() return item:getScriptItem() end)
+    if okScript and scriptItem then
+        local okCantEat, cantEat = pcall(function() return scriptItem:isCantEat() end)
+        if okCantEat and cantEat then return false end
+    end
+
     -- Must reduce hunger (PZ: negative hunger value quenches hunger).
-    local ok2, hunger = pcall(function() return item:getHunger() end)
+    local ok2, hunger = pcall(function() return item:getHungChange() end)
     if not ok2 then return false end
     if not hunger or hunger >= 0 then return false end
 
@@ -166,7 +175,8 @@ function AutoEat.isAllowedFood(item, player)
     -- name/type clearly describes a prepared dish. This allows transformed foods
     -- like TomatoSoup/PastaBowl while still blocking Base.Tomato/Base.Pasta.
     local ftl = ft:lower()
-    if isRawIngredientType(ftl) then
+    local expectedCannedOutput = expectedCannedOutputType == ft
+    if isRawIngredientType(ftl) and not expectedCannedOutput then
         if not (okC and cooked) and not isPreparedKeyword(name, ft) then return false end
     end
 
@@ -178,7 +188,7 @@ function AutoEat.isAllowedFood(item, player)
     -- not in the pattern list would still be caught here).
     -- -----------------------------------------------------------------------
     local isCookedItem = okC and cooked
-    if not isCookedItem and not isPreparedKeyword(name, ft) then
+    if not expectedCannedOutput and not isCookedItem and not isPreparedKeyword(name, ft) then
         return false
     end
 
@@ -192,7 +202,7 @@ function AutoEat.scoreFood(item)
 
     -- Base: more filling = higher score.
     local hungerVal = 0
-    pcall(function() hungerVal = -(item:getHunger()) end)
+    pcall(function() hungerVal = -(item:getHungChange()) end)
     score = score + hungerVal * 10
 
     -- Bonus for prepared-meal keyword in name/type.
@@ -276,24 +286,27 @@ end
 
 --- Queue an eat action for `item`.
 --- Uses a conservative portion (50%) when hunger is below FULL_EAT_THRESHOLD.
-local function queueEatAction(player, item, hunger)
+function AutoEat.queueEatAction(player, item, hunger)
     local portion = 1  -- full
     if hunger < AutoEat.FULL_EAT_THRESHOLD then
         portion = 0.5  -- conservative partial eat
     end
 
-    local ok, err = pcall(function()
+    local ok, queuedOrErr = pcall(function()
         if ISEatFoodAction then
-            local action = ISEatFoodAction:new(player, item, portion, 1)
+            local action = ISEatFoodAction:new(player, item, portion)
             ISTimedActionQueue.add(action)
             logDebug("queued ISEatFoodAction portion=" .. tostring(portion) .. " for " .. tostring(item:getFullType()))
+            return true
         else
             logDebug("ISEatFoodAction not available")
+            return false
         end
     end)
     if not ok then
-        logDebug("queueEatAction: error: " .. tostring(err))
+        logDebug("queueEatAction: error: " .. tostring(queuedOrErr))
     end
+    return ok and queuedOrErr == true
 end
 
 -- ---------------------------------------------------------------------------
@@ -303,6 +316,8 @@ end
 local function onPlayerUpdate(player)
     if player:getPlayerNum() ~= 0 then return end
 
+    AutoEatCans.update(player)
+
     -- Throttle.
     AutoEat._tick = AutoEat._tick + 1
     if AutoEat._tick < AutoEat.POLL_INTERVAL then return end
@@ -310,7 +325,7 @@ local function onPlayerUpdate(player)
 
     -- Check hunger (PZ: higher = hungrier).
     local hunger = 0
-    local okH = pcall(function() hunger = player:getHunger() end)
+    local okH = pcall(function() hunger = player:getStats():get(CharacterStat.HUNGER) end)
     if not okH then return end
     if hunger < AutoEat.HUNGER_THRESHOLD then return end
 
@@ -334,12 +349,15 @@ local function onPlayerUpdate(player)
 
     local item = AutoEat.findBestFood(player)
     if not item then
-        logDebug("hungry but no valid prepared food found")
+        if AutoEatCans.queueBestCan(player, hunger) then
+            return
+        end
+        logDebug("hungry but no valid prepared food or openable can found")
         return
     end
 
     logDebug("hunger=" .. tostring(hunger) .. " eating " .. tostring(item:getFullType()))
-    queueEatAction(player, item, hunger)
+    AutoEat.queueEatAction(player, item, hunger)
 end
 
 -- ---------------------------------------------------------------------------

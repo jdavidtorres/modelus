@@ -59,7 +59,7 @@ public final class LuaFallbackGenerator {
         sb.append("\n");
 
         // Multiplier
-        sb.append(String.format(Locale.ROOT, "WeightReducerCatalog_Generated.MULTIPLIER = %.1f%n",
+        sb.append(String.format(Locale.ROOT, "WeightReducerCatalog_Generated.MULTIPLIER = %.1f\n",
                 WeightReducerCatalog.MULTIPLIER));
         sb.append("\n");
 

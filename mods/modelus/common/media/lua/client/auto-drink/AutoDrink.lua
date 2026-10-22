@@ -19,8 +19,8 @@ end
 
 AutoDrink = AutoDrink or {}
 
--- Thirst level (0-100) at which auto-drink triggers.  Higher = thirstier.
-AutoDrink.THIRST_THRESHOLD = 30
+-- Normalized thirst level (0-1) at which auto-drink triggers. Higher = thirstier.
+AutoDrink.THIRST_THRESHOLD = 0.1
 
 -- Ticks between polls (~3 seconds at 60fps).
 AutoDrink.POLL_INTERVAL = 180
@@ -94,7 +94,7 @@ function AutoDrink.isAllowedDrink(item, player)
     if not (ok1 and isFood) then return false end
 
     -- Must have thirst-quench value (PZ convention: negative = quenches thirst).
-    local ok2, thirst = pcall(function() return item:getThirst() end)
+    local ok2, thirst = pcall(function() return item:getThirstChange() end)
     if not ok2 then return false end
     if not thirst or thirst >= 0 then return false end
 
@@ -120,7 +120,7 @@ function AutoDrink.scoreDrink(item)
     local tier = drinkTier(item)
     -- Secondary: absolute thirst reduction (more negative = more hydrating).
     local thirstVal = 0
-    pcall(function() thirstVal = -(item:getThirst()) end)
+    pcall(function() thirstVal = -(item:getThirstChange()) end)
     return tier * 1000 + thirstVal
 end
 
@@ -218,7 +218,7 @@ local function onPlayerUpdate(player)
 
     -- Check thirst (PZ: higher = thirstier).
     local thirst = 0
-    local okT = pcall(function() thirst = player:getThirst() end)
+    local okT = pcall(function() thirst = player:getStats():get(CharacterStat.THIRST) end)
     if not okT then return end
     if thirst < AutoDrink.THIRST_THRESHOLD then return end
 
