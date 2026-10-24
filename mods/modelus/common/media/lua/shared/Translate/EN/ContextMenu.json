@@ -1,5 +1,4 @@
 {
   "ContextMenu_ModelusAutoLootStart": "Auto Loot: collect",
-  "ContextMenu_ModelusAutoLootStop": "Auto Loot: stop collecting",
-  "ContextMenu_ModelusAutoLootUnavailable": "Auto Loot unavailable (Java bridge not initialized)"
+  "ContextMenu_ModelusAutoLootStop": "Auto Loot: stop collecting"
 }

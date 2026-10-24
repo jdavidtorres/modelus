@@ -20,7 +20,7 @@ end
 
 local CATALOG = AmmoConverterCatalog_Generated
 if not generatedOk or not CATALOG or not CATALOG.AMMO_TYPES or not CATALOG.PACKAGING then
-    print(_LOG_PREFIX .. " [ERROR] AmmoConverterCatalog.generated.lua not found or invalid. Run ./gradlew generateAmmoConverterLua.")
+    print(_LOG_PREFIX .. " [ERROR] AmmoConverterCatalog.generated.lua not found or invalid.")
     CATALOG = { AMMO_TYPES = {}, SCRIPT_TO_FULL_TYPE = {}, PACKAGING = {}, _lookup = {} }
 else
     print(_LOG_PREFIX .. " generated catalog loaded: " .. tostring(#CATALOG.AMMO_TYPES) .. " ammo types")

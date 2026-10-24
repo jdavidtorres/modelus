@@ -2,33 +2,51 @@ require "Entity/ISEntityUI"
 
 AutoEatCans = AutoEatCans or {}
 
-local function bindJavaClass(className)
-    if not luajava then return nil end
-    local ok, javaClass = pcall(luajava.bindClass, className)
-    if not ok then return nil end
-    return javaClass
+local catalogOk = pcall(require, "auto-eat/CannedFoodCatalog")
+if not catalogOk then
+    catalogOk = pcall(require, "CannedFoodCatalog")
+end
+local CATALOG = catalogOk and ModelusCannedFoodCatalog or nil
+
+local function newPendingCan()
+    local pending = { state = "PENDING" }
+    function pending:getState() return self.state end
+    local function transition(self, target)
+        if self.state ~= "PENDING" then return false end
+        self.state = target
+        return true
+    end
+    function pending:finish() return transition(self, "SUCCEEDED") end
+    function pending:cancel() return transition(self, "CANCELLED") end
+    function pending:fail() return transition(self, "FAILED") end
+    return pending
 end
 
-local function getCatalog()
-    return bindJavaClass("com.modelus.autoeat.CannedFoodCatalog")
-end
-
-local function getBridge()
-    if ModelusBridge then return ModelusBridge end
-    return bindJavaClass("com.modelus.bridge.ModelusBridge")
+local function createdOutput(recipeData, expectedType)
+    if not recipeData or type(expectedType) ~= "string" or expectedType:match("^%s*$") then
+        return nil
+    end
+    local okList, created = pcall(function() return recipeData:getAllCreatedItems() end)
+    if not okList or not created then return nil end
+    local okSize, size = pcall(function() return created:size() end)
+    if not okSize or size ~= 1 then return nil end
+    local okItem, item = pcall(function() return created:get(0) end)
+    if not okItem or not item then return nil end
+    local okType, fullType = pcall(function() return item:getFullType() end)
+    if not okType or fullType ~= expectedType then return nil end
+    return item
 end
 
 local function getCanDefinition(item)
     if not item then return nil end
-    local catalog = getCatalog()
-    if not catalog then return nil end
+    if not CATALOG then return nil end
 
     local okType, fullType = pcall(function() return item:getFullType() end)
     if not okType or not fullType then return nil end
 
-    local okRecipe, recipeName = pcall(catalog.openingRecipeFor, fullType)
-    local okOutput, expectedType = pcall(catalog.expectedOpenedType, fullType)
-    if not okRecipe or not okOutput or not recipeName or not expectedType then return nil end
+    local recipeName = CATALOG.openingRecipeFor(fullType)
+    local expectedType = CATALOG.expectedOpenedType(fullType)
+    if not recipeName or not expectedType then return nil end
 
     local okItemRecipe, itemRecipe = pcall(function() return item:getOpeningRecipe() end)
     if not okItemRecipe or itemRecipe ~= recipeName then return nil end
@@ -143,14 +161,13 @@ function AutoEatCans.onOpenComplete(attempt)
         return
     end
 
-    local bridge = getBridge()
-    if not bridge or not attempt.recipeData then
+    if not attempt.recipeData then
         failAttempt(attempt)
         return
     end
 
-    local okOutput, item = pcall(bridge.autoEatCreatedOutput, attempt.recipeData, attempt.expectedType)
-    if not okOutput or not item or not itemIsInContainer(attempt.player:getInventory(), item)
+    local item = createdOutput(attempt.recipeData, attempt.expectedType)
+    if not item or not itemIsInContainer(attempt.player:getInventory(), item)
             or not AutoEat.isAllowedFood(item, attempt.player, attempt.expectedType) then
         failAttempt(attempt)
         return
@@ -191,10 +208,7 @@ function AutoEatCans.queueOpenAction(player, canItem, definition)
     local action = ISEntityUI.HandcraftStart(player, logic, false, false, 0)
     if not action then return false end
 
-    local bridge = getBridge()
-    if not bridge then return false end
-    local okPending, pending = pcall(bridge.autoEatBeginOpen)
-    if not okPending or not pending then return false end
+    local pending = newPendingCan()
 
     local attempt = {
         player = player,

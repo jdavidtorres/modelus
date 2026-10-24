@@ -1,9 +1,12 @@
+// LEGACY / INACTIVE — retained for historical reference only.
+// Modelus runtime, validation, catalog maintenance, versioning, and deployment
+// are Lua-only and do not use this Java project.
+
 plugins {
     id 'java'
 }
 
 group = 'com.modelus'
-version = '0.8.1'
 
 java {
     toolchain {
@@ -15,10 +18,6 @@ repositories {
     mavenCentral()
 }
 
-// ── Project Zomboid API jar ───────────────────────────────────────────────────
-// Source of the PZ classes used by compileOnly. Override with -PpzJar=<path> or
-// the PZ_JAR environment variable (needed on WSL, where the Windows install
-// lives under /mnt/<drive> instead of a drive letter).
 def pzJar = providers.gradleProperty('pzJar')
         .orElse(providers.environmentVariable('PZ_JAR'))
         .getOrElse('D:/SteamLibrary/steamapps/common/ProjectZomboid/projectzomboid.jar')
@@ -32,109 +31,4 @@ dependencies {
 
 test {
     useJUnitPlatform()
-}
-
-tasks.named('jar') {
-    archiveBaseName = 'modelus'
-    destinationDirectory = file('../mods/modelus/common/media/java')
-}
-
-// ── validateWeightReducer ─────────────────────────────────────────────────────
-// Runs all WeightValidationRule implementations and fails the build on errors.
-tasks.register('validateWeightReducer', JavaExec) {
-    group = 'verification'
-    description = 'Run weight-reducer catalog validation rules.'
-
-    classpath = sourceSets.main.runtimeClasspath
-    mainClass = 'com.modelus.validation.WeightReducerValidationRunner'
-}
-
-// ── generateWeightReducerLua ──────────────────────────────────────────────────
-// Generates WeightReducerCatalog.generated.lua from Java catalog source of truth.
-tasks.register('generateWeightReducerLua', JavaExec) {
-    group = 'build'
-    description = 'Generate WeightReducerCatalog.generated.lua from Java catalog.'
-
-    classpath = sourceSets.main.runtimeClasspath
-    mainClass = 'com.modelus.validation.LuaFallbackGenerator'
-    // Pass project root so the generator writes to the correct path
-    args = [rootProject.projectDir.parentFile.absolutePath]
-}
-
-// ── generateAmmoConverterLua ─────────────────────────────────────────────────
-// Generates AmmoConverterCatalog.generated.lua from Java ammo converter config.
-tasks.register('generateAmmoConverterLua', JavaExec) {
-    group = 'build'
-    description = 'Generate AmmoConverterCatalog.generated.lua from Java config.'
-
-    classpath = sourceSets.main.runtimeClasspath
-    mainClass = 'com.modelus.ammoconverter.AmmoConverterLuaGenerator'
-    args = [rootProject.projectDir.parentFile.absolutePath]
-}
-
-// ── checkWeightReducerLuaDrift ────────────────────────────────────────────────
-// Fails the build if the committed WeightReducerCatalog.generated.lua differs
-// from what LuaFallbackGenerator would produce from the current Java catalog.
-// Detects stale committed files before they reach production / CI.
-tasks.register('checkWeightReducerLuaDrift', JavaExec) {
-    group = 'verification'
-    description = 'Fail build if committed generated Lua file differs from Java catalog output.'
-
-    classpath = sourceSets.main.runtimeClasspath
-    mainClass = 'com.modelus.validation.LuaDriftChecker'
-    args = [rootProject.projectDir.parentFile.absolutePath]
-}
-
-// ── checkAmmoConverterLuaDrift ────────────────────────────────────────────────
-// Fails the build if the committed AmmoConverterCatalog.generated.lua differs
-// from what AmmoConverterLuaGenerator would produce from the current Java config.
-tasks.register('checkAmmoConverterLuaDrift', JavaExec) {
-    group = 'verification'
-    description = 'Fail build if committed ammo converter generated Lua differs from Java config output.'
-
-    classpath = sourceSets.main.runtimeClasspath
-    mainClass = 'com.modelus.ammoconverter.AmmoConverterLuaDriftChecker'
-    args = [rootProject.projectDir.parentFile.absolutePath]
-}
-
-// ── Ensure check runs validation and generation parity ────────────────────────
-tasks.named('check') {
-    dependsOn validateWeightReducer
-    dependsOn checkWeightReducerLuaDrift
-    dependsOn checkAmmoConverterLuaDrift
-}
-
-// ── syncVersions ──────────────────────────────────────────────────────────────
-// Synchronize version across mod.info and ModelusMainScreen.lua from build.gradle
-tasks.register('syncVersions') {
-    group = 'build'
-    description = 'Synchronize version from build.gradle to mod.info and ModelusMainScreen.lua'
-
-    doLast {
-        def projectVersion = project.version.toString()
-        def rootPath = rootProject.projectDir.parentFile.absolutePath
-
-        // Update mod.info
-        def modInfoFile = file("${rootPath}/mods/modelus/common/mod.info")
-        if (modInfoFile.exists()) {
-            def modInfoContent = modInfoFile.text
-            modInfoContent = modInfoContent.replaceAll(/modversion=[\d.]+/, "modversion=${projectVersion}")
-            modInfoFile.text = modInfoContent
-            println("[syncVersions] Updated mod.info to version ${projectVersion}")
-        }
-
-        // Update ModelusMainScreen.lua
-        def luaFile = file("${rootPath}/mods/modelus/common/media/lua/client/ModelusMainScreen.lua")
-        if (luaFile.exists()) {
-            def luaContent = luaFile.text
-            luaContent = luaContent.replaceAll(/local versionText = "Modelus v[\d.]+"/, "local versionText = \"Modelus v${projectVersion}\"")
-            luaFile.text = luaContent
-            println("[syncVersions] Updated ModelusMainScreen.lua to version ${projectVersion}")
-        }
-    }
-}
-
-// Run syncVersions before jar task
-tasks.named('jar') {
-    dependsOn syncVersions
 }
